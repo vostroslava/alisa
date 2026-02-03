@@ -1,344 +1,209 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     View,
     Text,
-    TouchableOpacity,
     StyleSheet,
-    ScrollView,
+    TouchableOpacity,
+    SafeAreaView,
     Alert,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import type { RouteProp } from '@react-navigation/native';
+import { RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { useGetRecordingsQuery, useDeleteRecordingMutation } from '../store/api/recordingsApi';
 import { useAudioPlayer } from 'expo-audio';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { deleteRecording, retryUpload, fetchRecordings } from '../store/slices';
-import { Recording } from '../types';
-import * as FileSystem from 'expo-file-system';
 
-type RootStackParamList = {
-    RecordingDetail: { recordingId: string };
-};
-
-const STATUS_LABELS: Record<Recording['status'], string> = {
-    queued: 'В очереди на загрузку',
-    uploading: 'Загружается...',
-    uploaded: 'Успешно загружено',
-    error: 'Ошибка загрузки',
-    too_short: 'Слишком короткая запись',
-};
-
-const STATUS_COLORS: Record<Recording['status'], string> = {
-    queued: '#ffc107',
-    uploading: '#2196f3',
-    uploaded: '#4caf50',
-    error: '#f44336',
-    too_short: '#9e9e9e',
-};
+type DetailRouteProp = RouteProp<RootStackParamList, 'RecordingDetail'>;
 
 export function RecordingDetailScreen() {
-    const route = useRoute<RouteProp<RootStackParamList, 'RecordingDetail'>>();
+    const route = useRoute<DetailRouteProp>();
     const navigation = useNavigation();
-    const dispatch = useAppDispatch();
+    const { recordingId } = route.params;
 
-    const recording = useAppSelector((state) =>
-        state.recordings.items.find((r) => r.id === route.params.recordingId)
-    );
+    const { recording } = useGetRecordingsQuery(undefined, {
+        selectFromResult: ({ data }) => ({
+            recording: data?.find(r => r.id === recordingId)
+        })
+    });
 
+    const [deleteRecording] = useDeleteRecordingMutation();
     const [isPlaying, setIsPlaying] = useState(false);
-    const [playbackPosition, setPlaybackPosition] = useState(0);
 
-    const player = useAudioPlayer(recording?.localPath || '');
-
-    useEffect(() => {
-        if (!recording) {
-            dispatch(fetchRecordings());
-        }
-    }, [recording, dispatch]);
-
-    const handlePlayPause = async () => {
-        if (!recording) return;
-
-        if (isPlaying) {
-            player.pause();
-            setIsPlaying(false);
-        } else {
-            player.play();
-            setIsPlaying(true);
-        }
-    };
-
-    const handleRetry = async () => {
-        if (recording) {
-            dispatch(retryUpload(recording.id));
-        }
+    // Mock player logic (since real file might not exist for mock items)
+    // If localUri exists, we could use expo-audio. 
+    // For now, let's just toggle UI state for the prototype look.
+    const handlePlayPause = () => {
+        setIsPlaying(!isPlaying);
     };
 
     const handleDelete = () => {
-        if (!recording) return;
-
-        const canDelete =
-            recording.status === 'uploaded' ||
-            recording.status === 'too_short' ||
-            recording.status === 'error';
-
-        if (!canDelete) {
-            Alert.alert(
-                'Невозможно удалить',
-                'Дождитесь завершения загрузки перед удалением'
-            );
-            return;
-        }
-
         Alert.alert(
-            'Удалить запись?',
-            'Это действие нельзя отменить',
+            'Delete Recording',
+            'Are you sure?',
             [
-                { text: 'Отмена', style: 'cancel' },
+                { text: 'Cancel', style: 'cancel' },
                 {
-                    text: 'Удалить',
+                    text: 'Delete',
                     style: 'destructive',
                     onPress: async () => {
-                        // Delete local file
-                        try {
-                            const info = await FileSystem.getInfoAsync(recording.localPath);
-                            if (info.exists) {
-                                await FileSystem.deleteAsync(recording.localPath);
-                            }
-                        } catch {
-                            // Ignore file deletion errors
-                        }
-
-                        dispatch(deleteRecording(recording.id));
+                        await deleteRecording(recordingId);
                         navigation.goBack();
-                    },
-                },
+                    }
+                }
             ]
         );
     };
 
-    const formatDuration = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
-    const formatDate = (isoString: string): string => {
-        const date = new Date(isoString);
-        return date.toLocaleString('ru-RU', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
-
     if (!recording) {
         return (
-            <View style={styles.container}>
-                <Text style={styles.loadingText}>Загрузка...</Text>
-            </View>
+            <SafeAreaView style={styles.container}>
+                <View style={styles.content}>
+                    <Text>Recording not found</Text>
+                </View>
+            </SafeAreaView>
         );
     }
 
     return (
-        <ScrollView style={styles.container}>
-            <View style={styles.content}>
-                {/* Status */}
-                <View
-                    style={[
-                        styles.statusContainer,
-                        { backgroundColor: STATUS_COLORS[recording.status] + '20' },
-                    ]}
-                >
-                    <View
-                        style={[
-                            styles.statusDot,
-                            { backgroundColor: STATUS_COLORS[recording.status] },
-                        ]}
-                    />
-                    <Text
-                        style={[
-                            styles.statusText,
-                            { color: STATUS_COLORS[recording.status] },
-                        ]}
-                    >
-                        {STATUS_LABELS[recording.status]}
-                    </Text>
-                </View>
-
-                {/* Playback */}
-                <View style={styles.playbackSection}>
-                    <TouchableOpacity
-                        style={styles.playButton}
-                        onPress={handlePlayPause}
-                    >
-                        <Text style={styles.playButtonText}>
-                            {isPlaying ? '⏸' : '▶️'}
-                        </Text>
-                    </TouchableOpacity>
-                    <Text style={styles.duration}>
-                        {formatDuration(recording.durationSec)}
-                    </Text>
-                </View>
-
-                {/* Metadata */}
-                <View style={styles.metadataSection}>
-                    <View style={styles.metadataRow}>
-                        <Text style={styles.metadataLabel}>Начало:</Text>
-                        <Text style={styles.metadataValue}>
-                            {formatDate(recording.startedAt)}
-                        </Text>
-                    </View>
-                    <View style={styles.metadataRow}>
-                        <Text style={styles.metadataLabel}>Окончание:</Text>
-                        <Text style={styles.metadataValue}>
-                            {formatDate(recording.endedAt)}
-                        </Text>
-                    </View>
-                    {recording.uploadAttempts > 0 && (
-                        <View style={styles.metadataRow}>
-                            <Text style={styles.metadataLabel}>Попытки загрузки:</Text>
-                            <Text style={styles.metadataValue}>
-                                {recording.uploadAttempts}
-                            </Text>
-                        </View>
-                    )}
-                    {recording.lastError && (
-                        <View style={styles.errorSection}>
-                            <Text style={styles.errorLabel}>Последняя ошибка:</Text>
-                            <Text style={styles.errorText}>{recording.lastError}</Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Actions */}
-                <View style={styles.actionsSection}>
-                    {(recording.status === 'error' || recording.status === 'too_short') && (
-                        <TouchableOpacity
-                            style={[styles.actionButton, styles.retryButton]}
-                            onPress={handleRetry}
-                        >
-                            <Text style={styles.actionButtonText}>Повторить загрузку</Text>
-                        </TouchableOpacity>
-                    )}
-
-                    <TouchableOpacity
-                        style={[styles.actionButton, styles.deleteButton]}
-                        onPress={handleDelete}
-                    >
-                        <Text style={styles.actionButtonText}>Удалить</Text>
-                    </TouchableOpacity>
-                </View>
+        <SafeAreaView style={styles.container}>
+            <View style={styles.header}>
+                <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+                    <Text style={styles.backText}>{'< Back'}</Text>
+                </TouchableOpacity>
             </View>
-        </ScrollView>
+
+            <View style={styles.content}>
+                <Text style={styles.title}>Recording</Text>
+                <Text style={styles.subtitle}>#{recording.id}</Text>
+
+                <View style={styles.infoBlock}>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Date</Text>
+                        <Text style={styles.value}>{recording.date}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Conversation Time</Text>
+                        <Text style={styles.value}>{recording.duration}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>Start of conversation</Text>
+                        <Text style={styles.value}>{recording.startTime}</Text>
+                    </View>
+                    <View style={styles.infoRow}>
+                        <Text style={styles.label}>End of conversation</Text>
+                        <Text style={styles.value}>{recording.endTime}</Text>
+                    </View>
+                </View>
+
+                {/* Player UI */}
+                <View style={styles.playerContainer}>
+                    <TouchableOpacity onPress={handlePlayPause}>
+                        <Text style={styles.playIcon}>{isPlaying ? '⏸' : '▶️'}</Text>
+                    </TouchableOpacity>
+                    <View style={styles.progressBar}>
+                        <View style={[styles.progressFill, { width: isPlaying ? '50%' : '0%' }]} />
+                        <View style={[styles.knob, { left: isPlaying ? '50%' : '0%' }]} />
+                    </View>
+                    <Text style={styles.durationText}>{recording.duration}</Text>
+                </View>
+
+                <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+                    <Text style={styles.deleteText}>Delete Recording</Text>
+                </TouchableOpacity>
+            </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#fff',
+    },
+    header: {
+        paddingHorizontal: 20,
+        paddingTop: 10,
+    },
+    backButton: {
+        padding: 10,
+    },
+    backText: {
+        fontSize: 16,
+        color: '#000',
     },
     content: {
-        padding: 20,
+        padding: 24,
     },
-    loadingText: {
-        color: '#888',
-        fontSize: 16,
-        textAlign: 'center',
-        marginTop: 40,
-    },
-    statusContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 12,
-        borderRadius: 10,
-        gap: 8,
-    },
-    statusDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-    },
-    statusText: {
-        fontSize: 16,
-        fontWeight: '500',
-    },
-    playbackSection: {
-        alignItems: 'center',
-        paddingVertical: 40,
-    },
-    playButton: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: '#e94560',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginBottom: 16,
-    },
-    playButtonText: {
-        fontSize: 32,
-    },
-    duration: {
-        color: '#fff',
-        fontSize: 24,
-        fontWeight: '500',
-    },
-    metadataSection: {
-        backgroundColor: '#2a2a4a',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 20,
-    },
-    metadataRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        paddingVertical: 8,
-        borderBottomWidth: 1,
-        borderBottomColor: '#3a3a5a',
-    },
-    metadataLabel: {
-        color: '#888',
-        fontSize: 14,
-    },
-    metadataValue: {
-        color: '#fff',
-        fontSize: 14,
-    },
-    errorSection: {
-        marginTop: 12,
-        padding: 12,
-        backgroundColor: 'rgba(244, 67, 54, 0.1)',
-        borderRadius: 8,
-    },
-    errorLabel: {
-        color: '#f44336',
-        fontSize: 12,
+    title: {
+        fontSize: 28,
+        fontWeight: '700',
         marginBottom: 4,
     },
-    errorText: {
-        color: '#f44336',
+    subtitle: {
+        fontSize: 16,
+        color: '#8E8E93',
+        marginBottom: 32,
+    },
+    infoBlock: {
+        backgroundColor: '#F2F2F7',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 40,
+    },
+    infoRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginBottom: 12,
+    },
+    label: {
+        color: '#8E8E93',
         fontSize: 14,
     },
-    actionsSection: {
-        gap: 12,
+    value: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#000',
     },
-    actionButton: {
-        padding: 16,
-        borderRadius: 12,
+    playerContainer: {
+        flexDirection: 'row',
         alignItems: 'center',
+        gap: 16,
+        marginBottom: 40,
     },
-    retryButton: {
-        backgroundColor: '#2196f3',
+    playIcon: {
+        fontSize: 24,
+    },
+    progressBar: {
+        flex: 1,
+        height: 4,
+        backgroundColor: '#E5E5EA',
+        borderRadius: 2,
+        justifyContent: 'center',
+    },
+    progressFill: {
+        height: 4,
+        backgroundColor: '#000',
+        borderRadius: 2,
+    },
+    knob: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: '#000',
+        position: 'absolute',
+        marginLeft: -6,
+    },
+    durationText: {
+        fontSize: 12,
+        color: '#8E8E93',
     },
     deleteButton: {
-        backgroundColor: '#f44336',
+        alignItems: 'center',
+        padding: 16,
     },
-    actionButtonText: {
-        color: '#fff',
+    deleteText: {
+        color: '#FF3B30',
         fontSize: 16,
-        fontWeight: '600',
+        fontWeight: '500',
     },
 });

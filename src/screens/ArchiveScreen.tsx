@@ -1,254 +1,202 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
     View,
     Text,
-    FlatList,
-    TouchableOpacity,
-    TextInput,
     StyleSheet,
-    RefreshControl,
+    FlatList,
+    TextInput,
+    TouchableOpacity,
+    SafeAreaView,
 } from 'react-native';
+import { useGetRecordingsQuery } from '../store/api/recordingsApi';
+import { MockRecording } from '../types/mock';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchRecordings, setFilter, setSearch } from '../store/slices';
-import { Recording, RecordingFilter } from '../types';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/AppNavigator';
 
-type RootStackParamList = {
-    Archive: undefined;
-    RecordingDetail: { recordingId: string };
-};
+type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-const FILTERS: { key: RecordingFilter; label: string }[] = [
-    { key: 'all', label: 'Все' },
-    { key: 'uploaded', label: 'Загружены' },
-    { key: 'pending', label: 'В ожидании' },
-    { key: 'error', label: 'Ошибки' },
-];
-
-const STATUS_LABELS: Record<Recording['status'], string> = {
-    queued: 'В очереди',
-    uploading: 'Загрузка...',
-    uploaded: 'Загружено',
-    error: 'Ошибка',
-    too_short: 'Слишком короткая',
-};
-
-const STATUS_COLORS: Record<Recording['status'], string> = {
-    queued: '#ffc107',
-    uploading: '#2196f3',
-    uploaded: '#4caf50',
-    error: '#f44336',
-    too_short: '#9e9e9e',
-};
+const FILTER_TABS = ['All', 'Won', 'Posted', 'Recently Viewed'];
 
 export function ArchiveScreen() {
-    const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-    const dispatch = useAppDispatch();
-    const { items, filter, search, isLoading } = useAppSelector(
-        (state) => state.recordings
-    );
+    const navigation = useNavigation<NavigationProp>();
+    const { data: recordings = [], isLoading } = useGetRecordingsQuery();
+    const [searchQuery, setSearchQuery] = useState('');
+    const [activeFilter, setActiveFilter] = useState('All');
 
-    useEffect(() => {
-        dispatch(fetchRecordings());
-    }, [dispatch, filter, search]);
+    const filteredRecordings = recordings.filter((rec) => {
+        const matchesSearch = rec.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            rec.id.includes(searchQuery);
+        const matchesFilter = activeFilter === 'All' || rec.status === activeFilter.toLowerCase();
 
-    const formatDuration = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
+        if (activeFilter === 'Recently Viewed') return true;
 
-    const formatDate = (isoString: string): string => {
-        const date = new Date(isoString);
-        return date.toLocaleDateString('ru-RU', {
-            day: 'numeric',
-            month: 'short',
-            hour: '2-digit',
-            minute: '2-digit',
-        });
-    };
+        return matchesSearch && matchesFilter;
+    });
 
-    const renderRecording = ({ item }: { item: Recording }) => (
+    const renderItem = ({ item }: { item: MockRecording }) => (
         <TouchableOpacity
-            style={styles.recordingItem}
+            style={styles.itemContainer}
             onPress={() => navigation.navigate('RecordingDetail', { recordingId: item.id })}
         >
-            <View style={styles.recordingInfo}>
-                <Text style={styles.recordingDate}>{formatDate(item.startedAt)}</Text>
-                <Text style={styles.recordingDuration}>
-                    {formatDuration(item.durationSec)}
-                </Text>
+            <View>
+                <Text style={styles.itemDate}>{item.date}</Text>
+                <Text style={styles.itemId}>#{item.id}</Text>
             </View>
-            <View
-                style={[
-                    styles.statusBadge,
-                    { backgroundColor: STATUS_COLORS[item.status] + '20' },
-                ]}
-            >
-                <View
-                    style={[
-                        styles.statusDot,
-                        { backgroundColor: STATUS_COLORS[item.status] },
-                    ]}
-                />
-                <Text
-                    style={[styles.statusText, { color: STATUS_COLORS[item.status] }]}
-                >
-                    {STATUS_LABELS[item.status]}
-                </Text>
-            </View>
+            <Text style={styles.arrow}>{'>'}</Text>
         </TouchableOpacity>
     );
 
     return (
-        <View style={styles.container}>
-            {/* Search */}
+        <SafeAreaView style={styles.container}>
+            <View style={styles.header}>
+                <Text style={styles.headerTitle}>My recordings</Text>
+            </View>
+
             <View style={styles.searchContainer}>
-                <TextInput
-                    style={styles.searchInput}
-                    placeholder="Поиск..."
-                    placeholderTextColor="#666"
-                    value={search}
-                    onChangeText={(text) => dispatch(setSearch(text))}
+                <View style={styles.searchBar}>
+                    <Text style={styles.searchIcon}>🔍</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Search"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        placeholderTextColor="#999"
+                    />
+                </View>
+            </View>
+
+            <View style={styles.tabsContainer}>
+                <FlatList
+                    horizontal
+                    data={FILTER_TABS}
+                    showsHorizontalScrollIndicator={false}
+                    keyExtractor={(item) => item}
+                    renderItem={({ item }) => (
+                        <TouchableOpacity
+                            style={[
+                                styles.tab,
+                                activeFilter === item && styles.activeTab,
+                            ]}
+                            onPress={() => setActiveFilter(item)}
+                        >
+                            <Text
+                                style={[
+                                    styles.tabText,
+                                    activeFilter === item && styles.activeTabText,
+                                ]}
+                            >
+                                {item}
+                            </Text>
+                        </TouchableOpacity>
+                    )}
+                    contentContainerStyle={styles.tabsContent}
                 />
             </View>
 
-            {/* Filters */}
-            <View style={styles.filtersContainer}>
-                {FILTERS.map((f) => (
-                    <TouchableOpacity
-                        key={f.key}
-                        style={[
-                            styles.filterButton,
-                            filter === f.key && styles.filterButtonActive,
-                        ]}
-                        onPress={() => dispatch(setFilter(f.key))}
-                    >
-                        <Text
-                            style={[
-                                styles.filterText,
-                                filter === f.key && styles.filterTextActive,
-                            ]}
-                        >
-                            {f.label}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </View>
-
-            {/* List */}
             <FlatList
-                data={items}
+                data={filteredRecordings}
+                renderItem={renderItem}
                 keyExtractor={(item) => item.id}
-                renderItem={renderRecording}
                 contentContainerStyle={styles.listContent}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={isLoading}
-                        onRefresh={() => dispatch(fetchRecordings())}
-                        tintColor="#e94560"
-                    />
-                }
-                ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyText}>
-                            {isLoading ? 'Загрузка...' : 'Нет записей'}
-                        </Text>
-                    </View>
-                }
+                ItemSeparatorComponent={() => <View style={styles.separator} />}
             />
-        </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#fff',
+    },
+    header: {
+        paddingHorizontal: 20,
+        paddingTop: 10,
+        paddingBottom: 10,
+    },
+    headerTitle: {
+        fontSize: 28,
+        fontWeight: '700',
+        color: '#000',
     },
     searchContainer: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
+        paddingHorizontal: 20,
+        marginBottom: 16,
     },
-    searchInput: {
-        backgroundColor: '#2a2a4a',
-        borderRadius: 10,
-        padding: 12,
-        fontSize: 16,
-        color: '#fff',
-    },
-    filtersContainer: {
+    searchBar: {
         flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
+        alignItems: 'center',
+        backgroundColor: '#F2F2F7',
+        borderRadius: 10,
+        paddingHorizontal: 12,
+        height: 44,
+    },
+    searchIcon: {
+        marginRight: 8,
+        opacity: 0.5,
+    },
+    input: {
+        flex: 1,
+        fontSize: 16,
+        color: '#000',
+    },
+    tabsContainer: {
+        marginBottom: 10,
+    },
+    tabsContent: {
+        paddingHorizontal: 20,
         gap: 8,
     },
-    filterButton: {
-        paddingHorizontal: 14,
+    tab: {
+        paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
-        backgroundColor: '#2a2a4a',
+        backgroundColor: '#fff',
+        borderWidth: 1,
+        borderColor: '#E5E5EA',
     },
-    filterButtonActive: {
-        backgroundColor: '#e94560',
+    activeTab: {
+        backgroundColor: '#000',
+        borderColor: '#000',
     },
-    filterText: {
-        color: '#888',
+    tabText: {
         fontSize: 14,
-    },
-    filterTextActive: {
-        color: '#fff',
+        color: '#000',
         fontWeight: '500',
     },
-    listContent: {
-        padding: 16,
+    activeTabText: {
+        color: '#fff',
     },
-    recordingItem: {
-        backgroundColor: '#2a2a4a',
-        borderRadius: 12,
-        padding: 16,
-        marginBottom: 12,
+    listContent: {
+        paddingTop: 8,
+    },
+    itemContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        paddingVertical: 16,
+        paddingHorizontal: 20,
+        backgroundColor: '#fff',
     },
-    recordingInfo: {
-        flex: 1,
-    },
-    recordingDate: {
-        color: '#fff',
+    itemDate: {
         fontSize: 16,
-        fontWeight: '500',
+        fontWeight: '600',
+        color: '#000',
         marginBottom: 4,
     },
-    recordingDuration: {
-        color: '#888',
+    itemId: {
         fontSize: 14,
+        color: '#8E8E93',
     },
-    statusBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 12,
-        gap: 6,
+    arrow: {
+        fontSize: 20,
+        color: '#C7C7CC',
+        fontWeight: '300',
     },
-    statusDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-    },
-    statusText: {
-        fontSize: 12,
-        fontWeight: '500',
-    },
-    emptyContainer: {
-        paddingVertical: 60,
-        alignItems: 'center',
-    },
-    emptyText: {
-        color: '#666',
-        fontSize: 16,
+    separator: {
+        height: 1,
+        backgroundColor: '#E5E5EA',
+        marginLeft: 20,
     },
 });

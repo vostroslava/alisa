@@ -2,17 +2,21 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
-import { useAppSelector } from '../store/hooks';
+import { View, StyleSheet } from 'react-native';
 import {
-    LoginScreen,
     RecordScreen,
     ArchiveScreen,
     RecordingDetailScreen,
+    PostedScreen,
+    ProfileScreen,
 } from '../screens';
 
+// Icons (Simple shape placeholders for now, in real app use SVGs)
+const CircleIcon = ({ focused }: { focused: boolean }) => (
+    <View style={[styles.circle, focused && styles.activeCircle]} />
+);
+
 export type RootStackParamList = {
-    Login: undefined;
     Main: undefined;
     RecordingDetail: { recordingId: string };
 };
@@ -20,6 +24,8 @@ export type RootStackParamList = {
 export type MainTabParamList = {
     Record: undefined;
     Archive: undefined;
+    Posted: undefined;
+    Profile: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -30,24 +36,30 @@ function MainTabs() {
         <Tab.Navigator
             screenOptions={{
                 tabBarStyle: {
-                    backgroundColor: '#1a1a2e',
-                    borderTopColor: '#2a2a4a',
+                    backgroundColor: '#ffffff',
+                    borderTopWidth: 0,
+                    elevation: 0,
+                    height: 80,
+                    paddingBottom: 20,
                 },
-                tabBarActiveTintColor: '#e94560',
-                tabBarInactiveTintColor: '#666',
-                headerStyle: {
-                    backgroundColor: '#1a1a2e',
+                tabBarActiveTintColor: '#000000',
+                tabBarInactiveTintColor: '#C4C4C4',
+                headerShown: false,
+                tabBarShowLabel: true,
+                tabBarLabelStyle: {
+                    fontSize: 10,
+                    fontWeight: '500',
+                    marginTop: 5,
                 },
-                headerTintColor: '#fff',
             }}
         >
             <Tab.Screen
                 name="Record"
                 component={RecordScreen}
                 options={{
-                    title: 'Запись',
-                    tabBarIcon: ({ color }) => (
-                        <Text style={{ fontSize: 24 }}>🎙️</Text>
+                    tabBarLabel: 'Record',
+                    tabBarIcon: ({ color, focused }) => (
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: color }} />
                     ),
                 }}
             />
@@ -55,9 +67,29 @@ function MainTabs() {
                 name="Archive"
                 component={ArchiveScreen}
                 options={{
-                    title: 'Архив',
+                    tabBarLabel: 'Archive',
                     tabBarIcon: ({ color }) => (
-                        <Text style={{ fontSize: 24 }}>📁</Text>
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: color }} />
+                    ),
+                }}
+            />
+            <Tab.Screen
+                name="Posted"
+                component={PostedScreen}
+                options={{
+                    tabBarLabel: 'Posted',
+                    tabBarIcon: ({ color }) => (
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: color }} />
+                    ),
+                }}
+            />
+            <Tab.Screen
+                name="Profile"
+                component={ProfileScreen}
+                options={{
+                    tabBarLabel: 'Profile',
+                    tabBarIcon: ({ color }) => (
+                        <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: color }} />
                     ),
                 }}
             />
@@ -66,42 +98,33 @@ function MainTabs() {
 }
 
 export function AppNavigator() {
-    const isAuthenticated = useAppSelector((state) => state.auth.isAuthenticated);
-
     return (
         <NavigationContainer>
             <Stack.Navigator
                 screenOptions={{
-                    headerStyle: {
-                        backgroundColor: '#1a1a2e',
-                    },
-                    headerTintColor: '#fff',
-                    contentStyle: {
-                        backgroundColor: '#1a1a2e',
-                    },
+                    headerShown: false,
+                    contentStyle: { backgroundColor: '#ffffff' },
                 }}
             >
-                {!isAuthenticated ? (
-                    <Stack.Screen
-                        name="Login"
-                        component={LoginScreen}
-                        options={{ headerShown: false }}
-                    />
-                ) : (
-                    <>
-                        <Stack.Screen
-                            name="Main"
-                            component={MainTabs}
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="RecordingDetail"
-                            component={RecordingDetailScreen}
-                            options={{ title: 'Запись' }}
-                        />
-                    </>
-                )}
+                <Stack.Screen name="Main" component={MainTabs} />
+                <Stack.Screen
+                    name="RecordingDetail"
+                    component={RecordingDetailScreen}
+                    options={{ headerShown: false }}
+                />
             </Stack.Navigator>
         </NavigationContainer>
     );
 }
+
+const styles = StyleSheet.create({
+    circle: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: '#C4C4C4',
+    },
+    activeCircle: {
+        backgroundColor: '#000000',
+    },
+});

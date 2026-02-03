@@ -1,28 +1,20 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
     View,
     Text,
     TouchableOpacity,
     StyleSheet,
     Modal,
-    Animated,
-    Alert,
+    SafeAreaView,
 } from 'react-native';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import {
-    stopRecording as stopRecordingAction,
-    hideConfirmModal,
-    saveRecording,
-} from '../store/slices';
-import { useRecording } from '../hooks';
-import { config } from '../config';
+import { useRecording } from '../hooks/useRecording';
+import { useAddRecordingMutation } from '../store/api/recordingsApi';
+import { Waveform } from '../components';
+import { useNavigation } from '@react-navigation/native';
+import { RecordingResult } from '../types';
 
 export function RecordScreen() {
-    const dispatch = useAppDispatch();
-    const { showConfirmModal, pendingRecordingResult } = useAppSelector(
-        (state) => state.recordings
-    );
-
+    const navigation = useNavigation();
     const {
         isRecording,
         duration,
@@ -30,299 +22,304 @@ export function RecordScreen() {
         startRecording,
         stopRecording,
         cancelRecording,
-        hasPermission,
-        requestPermission,
     } = useRecording();
 
-    const pulseAnim = useRef(new Animated.Value(1)).current;
+    const [addRecording] = useAddRecordingMutation();
 
-    // Show error alert
-    useEffect(() => {
-        if (error) {
-            Alert.alert('Ошибка', error);
-        }
-    }, [error]);
+    const [modalVisible, setModalVisible] = useState(false);
+    const [successVisible, setSuccessVisible] = useState(false);
+    const [pendingResult, setPendingResult] = useState<RecordingResult | null>(null);
 
-    // Pulse animation for recording indicator
-    useEffect(() => {
-        if (isRecording) {
-            Animated.loop(
-                Animated.sequence([
-                    Animated.timing(pulseAnim, {
-                        toValue: 1.2,
-                        duration: 500,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(pulseAnim, {
-                        toValue: 1,
-                        duration: 500,
-                        useNativeDriver: true,
-                    }),
-                ])
-            ).start();
-        } else {
-            pulseAnim.setValue(1);
-        }
-    }, [isRecording, pulseAnim]);
+    const formatDuration = (seconds: number): string => {
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = Math.floor(seconds % 60);
+        return `${h.toString().padStart(2, '0')}:${m
+            .toString()
+            .padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    };
 
     const handleRecordPress = useCallback(async () => {
         if (isRecording) {
-            // Stop recording
             const result = await stopRecording();
             if (result) {
-                dispatch(stopRecordingAction(result));
+                setPendingResult(result);
+                setModalVisible(true);
             }
         } else {
-            // Check permission first
-            if (!hasPermission) {
-                const granted = await requestPermission();
-                if (!granted) {
-                    Alert.alert(
-                        'Доступ к микрофону',
-                        'Для записи необходимо разрешить доступ к микрофону в настройках'
-                    );
-                    return;
-                }
-            }
-            // Start recording
             await startRecording();
         }
-    }, [
-        isRecording,
-        hasPermission,
-        stopRecording,
-        startRecording,
-        requestPermission,
-        dispatch,
-    ]);
+    }, [isRecording, stopRecording, startRecording]);
 
-    const handleConfirm = useCallback(async () => {
-        if (pendingRecordingResult) {
-            const isTooShort = pendingRecordingResult.durationSec < config.THRESHOLD_SECONDS;
+    const handleFinish = async () => {
+        if (pendingResult) {
+            const startDate = new Date(pendingResult.startedAt);
+            const endDate = new Date(pendingResult.endedAt);
 
-            if (isTooShort) {
-                Alert.alert(
-                    'Короткая запись',
-                    `Записи короче ${config.THRESHOLD_SECONDS} секунд не будут автоматически загружены на сервер.`,
-                    [
-                        {
-                            text: 'Сохранить всё равно',
-                            onPress: () => dispatch(saveRecording(pendingRecordingResult)),
-                        },
-                        {
-                            text: 'Удалить',
-                            style: 'destructive',
-                            onPress: () => {
-                                dispatch(hideConfirmModal());
-                                cancelRecording();
-                            },
-                        },
-                    ]
-                );
-            } else {
-                dispatch(saveRecording(pendingRecordingResult));
-            }
+            await addRecording({
+                localUri: pendingResult.localPath,
+                durationSec: pendingResult.durationSec,
+                startedAt: startDate,
+                endedAt: endDate,
+            });
+
+            setModalVisible(false);
+            setSuccessVisible(true);
+
+            // Auto hide success after 2s
+            setTimeout(() => {
+                setSuccessVisible(false);
+                setPendingResult(null);
+                // Optionally navigate to Archive
+                // navigation.navigate('Archive' as any); 
+            }, 2000);
         }
-    }, [pendingRecordingResult, dispatch, cancelRecording]);
-
-    const handleCancel = useCallback(async () => {
-        dispatch(hideConfirmModal());
-        await cancelRecording();
-    }, [dispatch, cancelRecording]);
-
-    const formatDuration = (seconds: number): string => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        const ms = Math.floor((seconds % 1) * 10);
-        return `${mins.toString().padStart(2, '0')}:${secs
-            .toString()
-            .padStart(2, '0')}.${ms}`;
     };
 
+    const handleCancel = () => {
+        cancelRecording();
+        setModalVisible(false);
+        setPendingResult(null);
+    };
+
+    if (successVisible && pendingResult) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.successContent}>
+                    <View style={styles.checkmarkContainer}>
+                        <Text style={styles.checkmark}>✓</Text>
+                    </View>
+                    <Text style={styles.successTitle}>The recording was saved successfully</Text>
+
+                    <View style={styles.statsContainer}>
+                        <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Conversation Time</Text>
+                            <Text style={styles.statValue}>{formatDuration(pendingResult.durationSec)}</Text>
+                        </View>
+                        <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>Start of conversation</Text>
+                            <Text style={styles.statValue}>
+                                {new Date(pendingResult.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                        </View>
+                        <View style={styles.statRow}>
+                            <Text style={styles.statLabel}>End of conversation</Text>
+                            <Text style={styles.statValue}>
+                                {new Date(pendingResult.endedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
-        <View style={styles.container}>
-            {/* Timer */}
-            <View style={styles.timerContainer}>
-                <Text style={styles.timer}>{formatDuration(duration)}</Text>
-                {isRecording && (
-                    <Animated.View
-                        style={[
-                            styles.recordingIndicator,
-                            { transform: [{ scale: pulseAnim }] },
-                        ]}
-                    />
+        <SafeAreaView style={styles.container}>
+            <View style={styles.content}>
+
+                {isRecording ? (
+                    <>
+                        <Text style={styles.timerLarge}>{formatDuration(duration)}</Text>
+                        <View style={styles.waveformContainer}>
+                            <Waveform isRecording={isRecording} />
+                        </View>
+                    </>
+                ) : (
+                    <Text style={styles.title}>Tap to start recording</Text>
                 )}
+
+                <TouchableOpacity
+                    style={styles.mainButton}
+                    onPress={handleRecordPress}
+                    activeOpacity={0.8}
+                >
+                    <View style={[styles.mainButtonInner, isRecording && styles.stopButton]} />
+                </TouchableOpacity>
             </View>
-
-            {/* Record Button */}
-            <TouchableOpacity
-                style={[styles.recordButton, isRecording && styles.recordButtonActive]}
-                onPress={handleRecordPress}
-                activeOpacity={0.8}
-            >
-                <View
-                    style={[
-                        styles.recordButtonInner,
-                        isRecording && styles.recordButtonInnerActive,
-                    ]}
-                />
-            </TouchableOpacity>
-
-            <Text style={styles.hint}>
-                {isRecording ? 'Нажмите для остановки' : 'Нажмите для записи'}
-            </Text>
 
             {/* Confirm Modal */}
             <Modal
-                visible={showConfirmModal}
                 transparent
+                visible={modalVisible}
                 animationType="fade"
-                onRequestClose={handleCancel}
+                onRequestClose={() => setModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>Завершить запись?</Text>
-                        <Text style={styles.modalDuration}>
-                            Длительность:{' '}
-                            {formatDuration(pendingRecordingResult?.durationSec || 0)}
-                        </Text>
+                    <View style={styles.modalCard}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.timerSmall}>{formatDuration(pendingResult?.durationSec || 0)}</Text>
+                        </View>
+                        <Text style={styles.modalTitle}>Do you want to finish the recording?</Text>
 
-                        {(pendingRecordingResult?.durationSec || 0) < config.THRESHOLD_SECONDS && (
-                            <Text style={styles.warningText}>
-                                ⚠️ Запись короче {config.THRESHOLD_SECONDS} секунд
-                            </Text>
-                        )}
-
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.modalButtonCancel]}
-                                onPress={handleCancel}
-                            >
-                                <Text style={styles.modalButtonTextCancel}>Отмена</Text>
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity style={styles.outlineButton} onPress={handleCancel}>
+                                <Text style={styles.outlineButtonText}>Cancel</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity
-                                style={[styles.modalButton, styles.modalButtonConfirm]}
-                                onPress={handleConfirm}
-                            >
-                                <Text style={styles.modalButtonTextConfirm}>Завершить</Text>
+                            <TouchableOpacity style={styles.blackButton} onPress={handleFinish}>
+                                <Text style={styles.blackButtonText}>Finish</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#1a1a2e',
+        backgroundColor: '#fff',
+    },
+    content: {
+        flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        paddingBottom: 100, // Space for button
     },
-    timerContainer: {
-        alignItems: 'center',
+    title: {
+        fontSize: 18,
+        color: '#000',
         marginBottom: 60,
-    },
-    timer: {
-        fontSize: 48,
-        fontWeight: '300',
-        color: '#fff',
-        fontVariant: ['tabular-nums'],
-    },
-    recordingIndicator: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: '#e94560',
-        marginTop: 16,
-    },
-    recordButton: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: 'rgba(233, 69, 96, 0.2)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 4,
-        borderColor: '#e94560',
-    },
-    recordButtonActive: {
-        backgroundColor: 'rgba(233, 69, 96, 0.4)',
-    },
-    recordButtonInner: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        backgroundColor: '#e94560',
-    },
-    recordButtonInnerActive: {
-        borderRadius: 8,
-        width: 32,
-        height: 32,
-    },
-    hint: {
-        color: '#888',
-        fontSize: 14,
-        marginTop: 24,
-    },
-    modalOverlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    modalContent: {
-        backgroundColor: '#2a2a4a',
-        borderRadius: 16,
-        padding: 24,
-        width: '80%',
-        maxWidth: 320,
-    },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: '600',
-        color: '#fff',
-        textAlign: 'center',
-        marginBottom: 8,
-    },
-    modalDuration: {
-        fontSize: 16,
-        color: '#888',
-        textAlign: 'center',
-        marginBottom: 16,
-    },
-    warningText: {
-        color: '#ffc107',
-        textAlign: 'center',
-        marginBottom: 16,
-        fontSize: 14,
-    },
-    modalButtons: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    modalButton: {
-        flex: 1,
-        padding: 14,
-        borderRadius: 10,
-        alignItems: 'center',
-    },
-    modalButtonCancel: {
-        backgroundColor: '#3a3a5a',
-    },
-    modalButtonConfirm: {
-        backgroundColor: '#e94560',
-    },
-    modalButtonTextCancel: {
-        color: '#fff',
-        fontSize: 16,
         fontWeight: '500',
     },
-    modalButtonTextConfirm: {
-        color: '#fff',
+    timerLarge: {
+        fontSize: 24,
+        fontWeight: '600',
+        marginBottom: 40,
+        color: '#000',
+        fontVariant: ['tabular-nums'],
+    },
+    timerSmall: {
         fontSize: 16,
         fontWeight: '600',
+        color: '#000',
+        marginBottom: 10,
+        fontVariant: ['tabular-nums'],
+    },
+    waveformContainer: {
+        height: 60,
+        marginBottom: 60,
+        width: '80%',
+    },
+    mainButton: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#999', // Gray circle container logic from design? Or just minimal? Design shows gray circle.
+        justifyContent: 'center',
+        alignItems: 'center',
+        position: 'absolute',
+        bottom: 50,
+    },
+    mainButtonInner: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#8E8E93', // iOS Gray
+    },
+    stopButton: {
+        width: 30,
+        height: 30,
+        borderRadius: 4,
+        backgroundColor: '#fff', // White square inside gray circle? Or Gray circle becomes stop? 
+        // Design shows: 
+        // Idle: Gray Circle with Mic Icon (white)
+        // Recording: Gray Circle with Stop Square (white)
+        // Let's adjust to match design better
+    },
+
+    // Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 24,
+        width: '85%',
+        alignItems: 'center',
+    },
+    modalHeader: {
+        marginBottom: 10,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        textAlign: 'center',
+        marginBottom: 24,
+    },
+    modalActions: {
+        flexDirection: 'row',
+        gap: 12,
+        width: '100%',
+    },
+    outlineButton: {
+        flex: 1,
+        padding: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#000',
+        alignItems: 'center',
+    },
+    outlineButtonText: {
+        fontSize: 16,
+        fontWeight: '500',
+        color: '#000',
+    },
+    blackButton: {
+        flex: 1,
+        padding: 14,
+        borderRadius: 12,
+        backgroundColor: '#000',
+        alignItems: 'center',
+    },
+    blackButtonText: {
+        fontSize: 16,
+        fontWeight: '500',
+        color: '#fff',
+    },
+
+    // Success Screen
+    successContent: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 24,
+    },
+    checkmarkContainer: {
+        marginBottom: 24,
+    },
+    checkmark: {
+        fontSize: 48,
+        color: '#000',
+    },
+    successTitle: {
+        fontSize: 18,
+        textAlign: 'center',
+        marginBottom: 48,
+    },
+    statsContainer: {
+        width: '100%',
+        backgroundColor: '#F2F2F7', // Light gray block
+        borderRadius: 12,
+        padding: 16,
+    },
+    statRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingVertical: 8,
+    },
+    statLabel: {
+        color: '#8E8E93',
+        fontSize: 14,
+    },
+    statValue: {
+        fontSize: 14,
+        fontWeight: '500',
     },
 });
