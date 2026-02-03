@@ -13,18 +13,33 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.alisa.voicerecorder",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Приложению необходим доступ к микрофону для записи аудио",
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
+      "package": "com.alisa.voicerecorder",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.FOREGROUND_SERVICE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-audio",
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
   }
 }
